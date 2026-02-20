@@ -4,23 +4,20 @@
 //
 
 import SwiftUI
-
-@Observable
-@MainActor
-class MascotViewModel {
-    var level: Int
-    var stage: String
-    var mood: String
-    
-    init(level: Int = 1, stage: String = "Baby Chef", mood: String = "Curious") {
-        self.level = level
-        self.stage = stage
-        self.mood = mood
-    }
-}
+import SwiftData
+import PhotosUI
 
 struct HomeView: View {
-    @State private var mascot = MascotViewModel()
+    @Environment(\.modelContext) private var modelContext
+    @Query private var settingsArray: [UserSettings]
+    
+    @State private var mascotManager = MascotManager()
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isShowingReview = false
+    
+    private var userSettings: UserSettings? {
+        settingsArray.first
+    }
     
     var body: some View {
         NavigationStack {
@@ -36,14 +33,19 @@ struct HomeView: View {
                                 .fill(Color.accentColor.opacity(0.1))
                         )
                     
-                    Text("\(mascot.stage) - Level \(mascot.level)")
+                    Text("\(mascotManager.stage) - Level \(mascotManager.level)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     
-                    Text(greetingText(for: mascot.mood))
+                    Text(greetingText(for: mascotManager.mood))
                         .font(.title.bold())
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
+                    
+                    // Optional: show progress to next level
+                    ProgressView(value: mascotManager.progressToNextLevel)
+                        .padding(.horizontal, 40)
+                        .tint(.accentColor)
                 }
                 .padding(.top, 40)
                 
@@ -51,9 +53,7 @@ struct HomeView: View {
                 
                 // Action Buttons
                 VStack(spacing: 16) {
-                    Button {
-                        // Placeholder for scan action
-                    } label: {
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
                         HStack {
                             Image(systemName: "camera.viewfinder")
                             Text("Scan Fridge")
@@ -65,9 +65,15 @@ struct HomeView: View {
                         .foregroundStyle(.white)
                         .clipShape(.rect(cornerRadius: 16))
                     }
+                    .onChange(of: selectedPhoto) { _, newItem in
+                        if newItem != nil {
+                            mascotManager.recordAction(.scanCompleted)
+                            isShowingReview = true
+                        }
+                    }
                     
                     Button {
-                        // Placeholder for view last scan action
+                        // TODO: Implement view last scan
                     } label: {
                         Text("View last scan")
                             .font(.subheadline.bold())
@@ -78,25 +84,46 @@ struct HomeView: View {
                 .padding(.bottom, 40)
             }
             .navigationTitle("Home")
+            .navigationDestination(isPresented: $isShowingReview) {
+                IngredientReviewView(selectedPhoto: $selectedPhoto, isPresented: $isShowingReview)
+            }
+            .onAppear {
+                setupMascotManager()
+            }
         }
     }
     
-    private func greetingText(for mood: String) -> String {
+    private func setupMascotManager() {
+        let settings: UserSettings
+        if let existingSettings = userSettings {
+            settings = existingSettings
+        } else {
+            // First time logic: create default user settings
+            settings = UserSettings()
+            modelContext.insert(settings)
+        }
+        
+        mascotManager.setup(modelContext: modelContext, userSettings: settings)
+        mascotManager.recordAction(.appOpened)
+    }
+    
+    private func greetingText(for mood: MascotMood) -> String {
         switch mood {
-        case "Curious":
+        case .curious:
             return "Show me your fridge 👀"
-        case "Happy":
+        case .happy:
             return "Let's cook something together!"
-        case "Excited":
+        case .excited:
             return "Just leveled up!"
-        case "Sleepy":
+        case .sleepy:
             return "I missed your cooking..."
-        default:
-            return "Let's cook something!"
+        case .proud:
+            return "Look at what we made!"
         }
     }
 }
 
 #Preview {
     HomeView()
+        .modelContainer(for: [Recipe.self, IngredientScan.self, UserSettings.self], inMemory: true)
 }
